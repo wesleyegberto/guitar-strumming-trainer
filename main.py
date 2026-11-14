@@ -5,6 +5,7 @@ import threading
 import time
 import subprocess
 import os
+import json
 import wave
 import math
 import struct
@@ -12,6 +13,12 @@ import random
 import tempfile
 import unicodedata
 from rhythms_db import RHYTHMS
+from practice_data import (
+    CHORD_VOICINGS,
+    CHORD_PROGRESSIONS,
+    RHYTHM_COACHING,
+    DEFAULT_COACHING,
+)
 
 try:
     from AppKit import NSSound
@@ -20,22 +27,35 @@ except ImportError:
     HAS_NSSOUND = False
 
 HAND_CURSOR = "pointinghand"
+PREFS_PATH = os.path.expanduser("~/.rhythm_master_prefs.json")
 
 UI_TEXTS = {
     "en": {
-        "window_title": "Rhythm Master — Musical Practice",
+        "window_title": "Rhythm Master — Interactive Music Coach",
         "app_header": "Rhythm Master",
-        "app_subtitle": "Interactive Strumming & Percussion Trainer",
-        "search_placeholder": "Search rhythms...",
+        "app_subtitle": "Interactive Strumming, Rhythm & Ear Coach",
         "sound_guitar": "Guitar",
         "sound_perc": "Percussion",
         "sound_metro": "Metronome",
+        "cat_fav": "★",
         "cat_all": "All",
         "cat_brazil": "Brazil",
         "cat_general": "General",
         "cat_tech": "Technique",
         "origin_label": "Origin",
-        "sig_label": "Time Signature",
+        "sig_label": "Time",
+        "prog_label": "Harmony:",
+        "curr_chord": "NOW",
+        "next_chord": "NEXT",
+        "songs_prefix": "Songs:",
+        "tip_prefix": "Coach Tip:",
+        "count_in_banner": "GET READY — COUNT-IN",
+        "gap_muted_banner": "INTERNAL CLOCK TEST (MUTED BAR)",
+        "bar_counter": "Bar",
+        "coach_countin": "⏱ Count-in",
+        "coach_speed": "📈 Speed +5",
+        "coach_gap": "🔇 Gap 2+1",
+        "tap_btn": "👆 Tap",
         "legend_items": [
             ("#32D74B", "↓(B) Bass / Thumb"),
             ("#0A84FF", "↓(T) Treble / Fingers"),
@@ -45,22 +65,34 @@ UI_TEXTS = {
         "bpm_label": "TEMPO",
         "btn_play": "▶   Play Rhythm",
         "btn_stop": "⏹   Stop",
-        "shortcut_hint": "Press Spacebar to Play / Stop"
+        "shortcut_hint": "Spacebar: Play/Stop  •  T: Tap Tempo"
     },
     "pt": {
-        "window_title": "Mestre dos Ritmos — Prática Musical",
+        "window_title": "Mestre dos Ritmos — Professor Interativo",
         "app_header": "Mestre dos Ritmos",
-        "app_subtitle": "Treinador Interativo de Batidas e Percussão",
-        "search_placeholder": "Buscar ritmos...",
+        "app_subtitle": "Professor Interativo de Batidas, Harmonia e Tempo",
         "sound_guitar": "Violão",
         "sound_perc": "Percussão",
         "sound_metro": "Metrônomo",
+        "cat_fav": "★",
         "cat_all": "Todos",
         "cat_brazil": "Brasil",
         "cat_general": "Geral",
         "cat_tech": "Técnica",
         "origin_label": "Origem",
         "sig_label": "Compasso",
+        "prog_label": "Harmonia:",
+        "curr_chord": "AGORA",
+        "next_chord": "PRÓXIMO",
+        "songs_prefix": "Músicas:",
+        "tip_prefix": "Dica do Professor:",
+        "count_in_banner": "PREPARE-SE — CONTAGEM DE ENTRADA",
+        "gap_muted_banner": "RELÓGIO INTERNO (COMPASSO MUDO)",
+        "bar_counter": "Compasso",
+        "coach_countin": "⏱ Count-in",
+        "coach_speed": "📈 Acelerar +5",
+        "coach_gap": "🔇 Mudo 2+1",
+        "tap_btn": "👆 Tap",
         "legend_items": [
             ("#32D74B", "↓(B) Grave / Polegar"),
             ("#0A84FF", "↓(T) Agudo / Mão"),
@@ -70,7 +102,7 @@ UI_TEXTS = {
         "bpm_label": "ANDAMENTO",
         "btn_play": "▶   Tocar Ritmo",
         "btn_stop": "⏹   Parar",
-        "shortcut_hint": "Pressione Espaço para Tocar / Parar"
+        "shortcut_hint": "Espaço: Tocar/Parar  •  T: Tap Tempo"
     }
 }
 
@@ -88,6 +120,7 @@ COLORS = {
     "accent_red": "#FF453A",
     "accent_orange": "#FF9F0A",
     "accent_purple": "#BF5AF2",
+    "accent_gold": "#FFD60A",
 }
 
 
@@ -175,7 +208,7 @@ class RoundedButton(tk.Canvas):
 class StepCard(tk.Canvas):
     """Responsive rounded visual card for each rhythmic subdivision."""
     def __init__(self, parent, count_text, arrow_text, sound_type, **kwargs):
-        super().__init__(parent, width=10, height=130, bg=COLORS["bg_card"], highlightthickness=0, **kwargs)
+        super().__init__(parent, width=10, height=122, bg=COLORS["bg_card"], highlightthickness=0, **kwargs)
         self.count_text = count_text
         self.arrow_text = arrow_text
         self.sound_type = sound_type
@@ -226,10 +259,10 @@ class StepCard(tk.Canvas):
 
         pill_w = max(12, min(28, w * 0.48))
         pill_color = "#FFFFFF" if self.is_active else self.indicator_color
-        draw_rounded_rect(self, (w - pill_w) / 2, 12, (w + pill_w) / 2, 17, radius=3, fill=pill_color, outline="")
+        draw_rounded_rect(self, (w - pill_w) / 2, 11, (w + pill_w) / 2, 16, radius=3, fill=pill_color, outline="")
 
         self.create_text(
-            w / 2, 36,
+            w / 2, 34,
             text=self.count_text,
             fill=count_fg,
             font=("Helvetica Neue", count_font_size, "bold")
@@ -242,7 +275,7 @@ class StepCard(tk.Canvas):
             display_arrow = display_arrow.replace("(", "\n(")
 
         self.create_text(
-            w / 2, 82,
+            w / 2, 78,
             text=display_arrow,
             fill=arrow_fg,
             justify="center",
@@ -252,19 +285,17 @@ class StepCard(tk.Canvas):
 
 class MacNativeAudioEngine:
     """
-    Synthesizes acoustic guitar (Karplus-Strong), percussion, and metronome click samples,
-    pre-loading them into RAM via macOS CoreAudio (NSSound) for zero-latency playback.
+    Synthesizes multi-chord acoustic guitar (Karplus-Strong), percussion, and metronome
+    samples into RAM via macOS CoreAudio (NSSound) for zero-latency playback.
     """
     def __init__(self, pool_size=4):
         self.temp_dir = tempfile.gettempdir()
-        self.mode = "guitar"  # "guitar", "percussion", or "metronome"
+        self.mode = "guitar"
+        self.current_chord = "Am7"
+        self.pool_size = pool_size
+
         self.files = {
-            "guitar": {
-                "B": os.path.join(self.temp_dir, "gtr_bass.wav"),
-                "T": os.path.join(self.temp_dir, "gtr_treble.wav"),
-                "U": os.path.join(self.temp_dir, "gtr_upstroke.wav"),
-                "S": os.path.join(self.temp_dir, "gtr_slap.wav"),
-            },
+            "guitar": {},  # keyed by (chord_name, stroke_type)
             "percussion": {
                 "B": os.path.join(self.temp_dir, "perc_bass.wav"),
                 "T": os.path.join(self.temp_dir, "perc_treble.wav"),
@@ -280,13 +311,8 @@ class MacNativeAudioEngine:
         self._generate_percussion_samples()
         self._generate_metronome_samples()
 
-        self.pool_size = pool_size
         self.sound_pools = {"guitar": {}, "percussion": {}, "metronome": {}}
-        self.pool_indices = {
-            "guitar": {"B": 0, "T": 0, "U": 0, "S": 0},
-            "percussion": {"B": 0, "T": 0, "U": 0, "S": 0},
-            "metronome": {"M_ACCENT": 0, "M_BEAT": 0},
-        }
+        self.pool_indices = {"guitar": {}, "percussion": {}, "metronome": {}}
 
         if HAS_NSSOUND:
             for mode_name, paths in self.files.items():
@@ -297,6 +323,7 @@ class MacNativeAudioEngine:
                         if snd:
                             voices.append(snd)
                     self.sound_pools[mode_name][key] = voices
+                    self.pool_indices[mode_name][key] = 0
 
     def _write_wav(self, path, samples, sample_rate=44100):
         with wave.open(path, "w") as wav_file:
@@ -307,7 +334,6 @@ class MacNativeAudioEngine:
             wav_file.writeframes(data)
 
     def _karplus_strong_string(self, freq, duration, sr=44100, decay=0.996, brightness=0.5, gain=1.0):
-        """Physical modeling of a plucked/strummed acoustic guitar string without DC offset."""
         period = max(2, int(round(sr / freq)))
         num_samples = int(sr * duration)
 
@@ -351,7 +377,6 @@ class MacNativeAudioEngine:
         return out
 
     def _mix_strum(self, notes_with_delays, total_duration, sr=44100, decay=0.9955, brightness=0.45, target_peak=0.72):
-        """Mixes multiple guitar strings with headroom and soft saturation protection."""
         total_len = int(sr * total_duration)
         mix = [0.0] * total_len
         for freq, delay_sec, gain in notes_with_delays:
@@ -372,37 +397,8 @@ class MacNativeAudioEngine:
 
     def _generate_guitar_samples(self):
         sr = 44100
-        bass_notes = [
-            (110.00, 0.000, 0.85),
-            (164.81, 0.014, 0.45),
-            (196.00, 0.026, 0.25),
-        ]
-        samples_b = self._mix_strum(
-            bass_notes, total_duration=0.44, sr=sr, decay=0.9965, brightness=0.25, target_peak=0.70
-        )
-        self._write_wav(self.files["guitar"]["B"], samples_b, sr)
-
-        treble_notes = [
-            (164.81, 0.000, 0.45),
-            (196.00, 0.009, 0.65),
-            (246.94, 0.018, 0.75),
-            (329.63, 0.027, 0.80),
-        ]
-        samples_t = self._mix_strum(
-            treble_notes, total_duration=0.36, sr=sr, decay=0.995, brightness=0.55, target_peak=0.72
-        )
-        self._write_wav(self.files["guitar"]["T"], samples_t, sr)
-
-        up_notes = [
-            (329.63, 0.000, 0.70),
-            (246.94, 0.008, 0.60),
-            (196.00, 0.016, 0.45),
-        ]
-        samples_u = self._mix_strum(
-            up_notes, total_duration=0.26, sr=sr, decay=0.9935, brightness=0.50, target_peak=0.65
-        )
-        self._write_wav(self.files["guitar"]["U"], samples_u, sr)
-
+        # Shared slap sample across chords
+        slap_path = os.path.join(self.temp_dir, "gtr_slap_shared.wav")
         muted_notes = [
             (110.00, 0.000, 0.50),
             (196.00, 0.005, 0.65),
@@ -416,7 +412,31 @@ class MacNativeAudioEngine:
             t = i / sr
             body_thump = 0.25 * math.exp(-t * 55) * math.sin(2 * math.pi * 120 * t)
             samples_s[i] = max(-0.85, min(0.85, samples_s[i] + body_thump))
-        self._write_wav(self.files["guitar"]["S"], samples_s, sr)
+        self._write_wav(slap_path, samples_s, sr)
+
+        for chord_name, voicing in CHORD_VOICINGS.items():
+            path_b = os.path.join(self.temp_dir, f"gtr_{chord_name}_B.wav")
+            samples_b = self._mix_strum(
+                voicing["B"], total_duration=0.44, sr=sr, decay=0.9965, brightness=0.25, target_peak=0.70
+            )
+            self._write_wav(path_b, samples_b, sr)
+
+            path_t = os.path.join(self.temp_dir, f"gtr_{chord_name}_T.wav")
+            samples_t = self._mix_strum(
+                voicing["T"], total_duration=0.36, sr=sr, decay=0.995, brightness=0.55, target_peak=0.72
+            )
+            self._write_wav(path_t, samples_t, sr)
+
+            path_u = os.path.join(self.temp_dir, f"gtr_{chord_name}_U.wav")
+            samples_u = self._mix_strum(
+                voicing["U"], total_duration=0.26, sr=sr, decay=0.9935, brightness=0.50, target_peak=0.65
+            )
+            self._write_wav(path_u, samples_u, sr)
+
+            self.files["guitar"][(chord_name, "B")] = path_b
+            self.files["guitar"][(chord_name, "T")] = path_t
+            self.files["guitar"][(chord_name, "U")] = path_u
+            self.files["guitar"][(chord_name, "S")] = slap_path
 
     def _generate_percussion_samples(self):
         sr = 44100
@@ -446,11 +466,9 @@ class MacNativeAudioEngine:
         self._write_wav(self.files["percussion"]["S"], samples_s, sr)
 
     def _generate_metronome_samples(self):
-        """Generates crisp woodblock-style metronome clicks (Accented Beat 1 vs. Regular Beat)."""
         sr = 44100
         dur = 0.055
 
-        # Accented Beat 1: High woodblock pitch (1320 Hz + harmonic overtone)
         samples_acc = []
         for i in range(int(sr * dur)):
             t = i / sr
@@ -459,7 +477,6 @@ class MacNativeAudioEngine:
             samples_acc.append(0.82 * env * wave_val)
         self._write_wav(self.files["metronome"]["M_ACCENT"], samples_acc, sr)
 
-        # Regular Main Beat (2, 3, 4...): Warm woodblock pitch (880 Hz)
         samples_beat = []
         for i in range(int(sr * dur)):
             t = i / sr
@@ -472,35 +489,59 @@ class MacNativeAudioEngine:
         if mode in self.files:
             self.mode = mode
 
+    def set_chord(self, chord_name):
+        if chord_name in CHORD_VOICINGS:
+            self.current_chord = chord_name
+
+    def play_metronome_click(self, accent=False):
+        key = "M_ACCENT" if accent else "M_BEAT"
+        self._play_key("metronome", key)
+
     def play(self, sound_type):
         mode = self.mode
-        if sound_type not in self.files[mode]:
-            return
+        if mode == "guitar":
+            key = (self.current_chord, sound_type)
+        else:
+            key = sound_type
+        self._play_key(mode, key)
 
-        if HAS_NSSOUND and sound_type in self.sound_pools[mode] and self.sound_pools[mode][sound_type]:
-            idx = self.pool_indices[mode][sound_type]
-            snd = self.sound_pools[mode][sound_type][idx]
-            self.pool_indices[mode][sound_type] = (idx + 1) % len(self.sound_pools[mode][sound_type])
+    def _play_key(self, mode, key):
+        if key not in self.files[mode]:
+            return
+        if HAS_NSSOUND and key in self.sound_pools[mode] and self.sound_pools[mode][key]:
+            idx = self.pool_indices[mode][key]
+            snd = self.sound_pools[mode][key][idx]
+            self.pool_indices[mode][key] = (idx + 1) % len(self.sound_pools[mode][key])
             snd.stop()
             snd.setCurrentTime_(0.0)
             snd.play()
         else:
-            subprocess.Popen(["afplay", self.files[mode][sound_type]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["afplay", self.files[mode][key]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class RhythmMasterApp:
     def __init__(self, root):
         self.root = root
-        self.root.geometry("1150x680")
-        self.root.minsize(980, 620)
+        self.root.geometry("1200x740")
+        self.root.minsize(1040, 680)
         self.root.configure(bg=COLORS["bg_main"])
 
-        self.language = tk.StringVar(value="pt")
+        self.prefs = self._load_prefs()
+        self.favorites = set(self.prefs.get("favorites", []))
+
+        self.language = tk.StringVar(value=self.prefs.get("language", "pt"))
         self.sound_mode = tk.StringVar(value="guitar")
         self.category_filter = tk.StringVar(value="all")
         self.search_query = tk.StringVar(value="")
         self.current_rhythm_id = "traditional_samba"
         self.visible_keys = []
+
+        # Coaching & Harmony States
+        self.count_in_enabled = tk.BooleanVar(value=True)
+        self.speed_trainer_enabled = tk.BooleanVar(value=False)
+        self.gap_click_enabled = tk.BooleanVar(value=False)
+        self.progression_key = tk.StringVar(value="fixed")
+        self.tap_timestamps = []
 
         self.audio = MacNativeAudioEngine()
         self.is_playing = False
@@ -511,11 +552,34 @@ class RhythmMasterApp:
         self.cat_buttons = {}
         self.lang_buttons = {}
         self.sound_buttons = {}
+        self.coach_buttons = {}
+        self.prog_buttons = {}
 
         self._build_ui()
         self._apply_language()
 
         self.root.bind("<space>", self._on_spacebar)
+        self.root.bind("<KeyPress-t>", self._on_tap_key)
+        self.root.bind("<KeyPress-T>", self._on_tap_key)
+
+    def _load_prefs(self):
+        if os.path.exists(PREFS_PATH):
+            try:
+                with open(PREFS_PATH, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_prefs(self):
+        try:
+            with open(PREFS_PATH, "w", encoding="utf-8") as f:
+                json.dump({
+                    "favorites": sorted(self.favorites),
+                    "language": self.language.get()
+                }, f, indent=2)
+        except Exception:
+            pass
 
     def _tr(self, key):
         return UI_TEXTS[self.language.get()][key]
@@ -524,8 +588,12 @@ class RhythmMasterApp:
         if self.root.focus_get() != self.search_entry:
             self._toggle_playback()
 
+    def _on_tap_key(self, event):
+        if self.root.focus_get() != self.search_entry:
+            self._handle_tap_tempo()
+
     def _build_ui(self):
-        header = tk.Frame(self.root, bg=COLORS["bg_main"], padx=28, pady=18)
+        header = tk.Frame(self.root, bg=COLORS["bg_main"], padx=28, pady=14)
         header.pack(fill="x")
 
         title_box = tk.Frame(header, bg=COLORS["bg_main"])
@@ -533,7 +601,7 @@ class RhythmMasterApp:
 
         self.lbl_header = tk.Label(
             title_box, text="", bg=COLORS["bg_main"], fg=COLORS["text_primary"],
-            font=("Helvetica Neue", 24, "bold")
+            font=("Helvetica Neue", 23, "bold")
         )
         self.lbl_header.pack(anchor="w")
 
@@ -543,11 +611,9 @@ class RhythmMasterApp:
         )
         self.lbl_subtitle.pack(anchor="w", pady=(2, 0))
 
-        # Top-right segmented controls (Audio Mode + Language)
         right_controls = tk.Frame(header, bg=COLORS["bg_main"])
         right_controls.pack(side="right", anchor="center")
 
-        # Audio mode switch (Guitar | Percussion | Metronome)
         sound_container = tk.Frame(right_controls, bg=COLORS["bg_sidebar"], padx=4, pady=4)
         sound_container.pack(side="left", padx=(0, 14))
 
@@ -560,7 +626,6 @@ class RhythmMasterApp:
             btn.bind("<Button-1>", lambda e, m=mode_code: self._set_sound_mode(m))
             self.sound_buttons[mode_code] = btn
 
-        # Language switch (EN | PT)
         lang_container = tk.Frame(right_controls, bg=COLORS["bg_sidebar"], padx=4, pady=4)
         lang_container.pack(side="left")
 
@@ -573,12 +638,12 @@ class RhythmMasterApp:
             btn.bind("<Button-1>", lambda e, c=code: self._set_language(c))
             self.lang_buttons[code] = btn
 
-        main_area = tk.Frame(self.root, bg=COLORS["bg_main"], padx=28, pady=6)
+        main_area = tk.Frame(self.root, bg=COLORS["bg_main"], padx=28, pady=4)
         main_area.pack(fill="both", expand=True)
 
         # Left Sidebar
-        sidebar_canvas = tk.Canvas(main_area, width=300, bg=COLORS["bg_main"], highlightthickness=0)
-        sidebar_canvas.pack(side="left", fill="y", padx=(0, 22), pady=(0, 22))
+        sidebar_canvas = tk.Canvas(main_area, width=320, bg=COLORS["bg_main"], highlightthickness=0)
+        sidebar_canvas.pack(side="left", fill="y", padx=(0, 22), pady=(0, 20))
         sidebar_canvas.pack_propagate(False)
 
         sidebar_inner = tk.Frame(sidebar_canvas, bg=COLORS["bg_sidebar"], padx=14, pady=14)
@@ -592,7 +657,7 @@ class RhythmMasterApp:
         )
 
         search_box = tk.Canvas(sidebar_inner, height=38, bg=COLORS["bg_sidebar"], highlightthickness=0)
-        search_box.pack(fill="x", pady=(0, 12))
+        search_box.pack(fill="x", pady=(0, 10))
 
         self.search_entry = tk.Entry(
             search_box, textvariable=self.search_query, bg=COLORS["bg_step"],
@@ -610,14 +675,14 @@ class RhythmMasterApp:
         self.search_query.trace_add("write", lambda *args: self._update_rhythm_list())
 
         cat_bar = tk.Frame(sidebar_inner, bg=COLORS["bg_step"], padx=3, pady=3)
-        cat_bar.pack(fill="x", pady=(0, 12))
+        cat_bar.pack(fill="x", pady=(0, 10))
 
-        for cat_key in ["all", "brazil", "general", "tech"]:
+        for cat_key in ["fav", "all", "brazil", "general", "tech"]:
             lbl = tk.Label(
                 cat_bar, text="", pady=6, cursor=HAND_CURSOR,
-                font=("Helvetica Neue", 11, "bold")
+                font=("Helvetica Neue", 10, "bold")
             )
-            lbl.pack(side="left", expand=True, fill="x", padx=2)
+            lbl.pack(side="left", expand=True, fill="x", padx=1)
             lbl.bind("<Button-1>", lambda e, ck=cat_key: self._set_category(ck))
             self.cat_buttons[cat_key] = lbl
 
@@ -639,30 +704,45 @@ class RhythmMasterApp:
 
         # Right Stage
         stage_canvas = tk.Canvas(main_area, width=10, bg=COLORS["bg_main"], highlightthickness=0)
-        stage_canvas.pack(side="right", fill="both", expand=True, pady=(0, 22))
+        stage_canvas.pack(side="right", fill="both", expand=True, pady=(0, 20))
 
-        stage_inner = tk.Frame(stage_canvas, bg=COLORS["bg_card"], padx=24, pady=22)
+        stage_inner = tk.Frame(stage_canvas, bg=COLORS["bg_card"], padx=24, pady=18)
         stage_win = stage_canvas.create_window((0, 0), window=stage_inner, anchor="nw")
         stage_canvas.bind(
             "<Configure>",
             lambda e: (
                 self._redraw_panel(stage_canvas, COLORS["bg_card"], COLORS["border_subtle"]),
                 stage_canvas.itemconfigure(stage_win, width=e.width, height=e.height),
-                self.lbl_description.config(wraplength=max(300, e.width - 56))
+                self.lbl_description.config(wraplength=max(300, e.width - 56)),
+                self.lbl_coaching.config(wraplength=max(300, e.width - 56))
             )
         )
 
+        # Top Info Row: Favorite Star + Title + Badges
         top_info = tk.Frame(stage_inner, bg=COLORS["bg_card"])
         top_info.pack(fill="x")
 
+        self.btn_fav = tk.Label(
+            top_info, text="☆", bg=COLORS["bg_card"], fg=COLORS["accent_gold"],
+            font=("Helvetica Neue", 22), cursor=HAND_CURSOR
+        )
+        self.btn_fav.pack(side="left", padx=(0, 8))
+        self.btn_fav.bind("<Button-1>", lambda e: self._toggle_favorite())
+
         self.lbl_rhythm_title = tk.Label(
             top_info, text="", bg=COLORS["bg_card"], fg=COLORS["text_primary"],
-            font=("Helvetica Neue", 20, "bold"), anchor="w"
+            font=("Helvetica Neue", 19, "bold"), anchor="w"
         )
         self.lbl_rhythm_title.pack(side="left")
 
         badges_frame = tk.Frame(top_info, bg=COLORS["bg_card"])
         badges_frame.pack(side="right")
+
+        self.lbl_bar_counter = tk.Label(
+            badges_frame, text="", bg="#2C2C35", fg=COLORS["accent_green"],
+            font=("Helvetica Neue", 11, "bold"), padx=10, pady=5
+        )
+        self.lbl_bar_counter.pack(side="left", padx=(0, 8))
 
         self.badge_origin = tk.Label(
             badges_frame, text="", bg="#1D3557", fg="#64D2FF",
@@ -671,31 +751,122 @@ class RhythmMasterApp:
         self.badge_origin.pack(side="left", padx=(0, 8))
 
         self.badge_sig = tk.Label(
-            badges_frame, text="", bg="#2C2C35", fg="#FFD60A",
+            badges_frame, text="", bg="#2C2C35", fg=COLORS["accent_gold"],
             font=("Helvetica Neue", 11, "bold"), padx=10, pady=5
         )
         self.badge_sig.pack(side="left")
 
         self.lbl_description = tk.Label(
             stage_inner, text="", bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
-            font=("Helvetica Neue", 13), wraplength=600, justify="left", anchor="w"
+            font=("Helvetica Neue", 12), wraplength=650, justify="left", anchor="w"
         )
-        self.lbl_description.pack(fill="x", pady=(10, 20))
+        self.lbl_description.pack(fill="x", pady=(6, 4))
 
+        self.lbl_coaching = tk.Label(
+            stage_inner, text="", bg=COLORS["bg_card"], fg="#8E8E98",
+            font=("Helvetica Neue", 11, "italic"), wraplength=650, justify="left", anchor="w"
+        )
+        self.lbl_coaching.pack(fill="x", pady=(0, 12))
+
+        # Harmony & Chord Teleprompter Bar
+        harmony_bar = tk.Frame(stage_inner, bg=COLORS["bg_step"], padx=12, pady=8)
+        harmony_bar.pack(fill="x", pady=(0, 12))
+
+        self.lbl_prog_title = tk.Label(
+            harmony_bar, text="", bg=COLORS["bg_step"], fg=COLORS["text_secondary"],
+            font=("Helvetica Neue", 10, "bold")
+        )
+        self.lbl_prog_title.pack(side="left", padx=(0, 8))
+
+        prog_pills = tk.Frame(harmony_bar, bg=COLORS["bg_step"])
+        prog_pills.pack(side="left")
+
+        short_prog_labels = {
+            "fixed": "Am7",
+            "pop_canon": "G-D-Em-C",
+            "bossa_251": "II-V-I (C)",
+            "samba_cadence": "Samba",
+            "forro_baiao": "Baião (A)",
+        }
+        for p_key, p_short in short_prog_labels.items():
+            lbl = tk.Label(
+                prog_pills, text=p_short, padx=8, pady=3, cursor=HAND_CURSOR,
+                font=("Helvetica Neue", 10, "bold")
+            )
+            lbl.pack(side="left", padx=2)
+            lbl.bind("<Button-1>", lambda e, pk=p_key: self._set_progression(pk))
+            self.prog_buttons[p_key] = lbl
+
+        chord_teleprompter = tk.Frame(harmony_bar, bg=COLORS["bg_step"])
+        chord_teleprompter.pack(side="right")
+
+        self.lbl_curr_chord_tag = tk.Label(
+            chord_teleprompter, text="NOW:", bg=COLORS["bg_step"], fg=COLORS["text_secondary"],
+            font=("Helvetica Neue", 9, "bold")
+        )
+        self.lbl_curr_chord_tag.pack(side="left", padx=(0, 4))
+
+        self.lbl_curr_chord_val = tk.Label(
+            chord_teleprompter, text="Am7", bg="#1D3557", fg="#64D2FF",
+            font=("Helvetica Neue", 12, "bold"), padx=10, pady=2
+        )
+        self.lbl_curr_chord_val.pack(side="left", padx=(0, 10))
+
+        self.lbl_next_chord_tag = tk.Label(
+            chord_teleprompter, text="NEXT:", bg=COLORS["bg_step"], fg=COLORS["text_secondary"],
+            font=("Helvetica Neue", 9, "bold")
+        )
+        self.lbl_next_chord_tag.pack(side="left", padx=(0, 4))
+
+        self.lbl_next_chord_val = tk.Label(
+            chord_teleprompter, text="Am7", bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
+            font=("Helvetica Neue", 11, "bold"), padx=8, pady=2
+        )
+        self.lbl_next_chord_val.pack(side="left")
+
+        # Status Banner (Count-in / Gap Click feedback)
+        self.lbl_status_banner = tk.Label(
+            stage_inner, text="", bg=COLORS["bg_card"], fg=COLORS["accent_orange"],
+            font=("Helvetica Neue", 11, "bold")
+        )
+        self.lbl_status_banner.pack(fill="x", pady=(0, 4))
+
+        # Beat Grid
         self.grid_frame = tk.Frame(stage_inner, bg=COLORS["bg_card"])
-        self.grid_frame.pack(fill="x", pady=(6, 18))
+        self.grid_frame.pack(fill="x", pady=(2, 12))
 
-        self.legend_frame = tk.Frame(stage_inner, bg=COLORS["bg_card"])
-        self.legend_frame.pack(fill="x", pady=(0, 16))
+        # Legend + Coach Tools Row
+        tools_row = tk.Frame(stage_inner, bg=COLORS["bg_card"])
+        tools_row.pack(fill="x", pady=(0, 12))
+
+        self.legend_frame = tk.Frame(tools_row, bg=COLORS["bg_card"])
+        self.legend_frame.pack(side="left")
+
+        coach_toggles = tk.Frame(tools_row, bg=COLORS["bg_card"])
+        coach_toggles.pack(side="right")
+
+        for key_name, var_ref in [
+            ("count_in", self.count_in_enabled),
+            ("speed_trainer", self.speed_trainer_enabled),
+            ("gap_click", self.gap_click_enabled),
+        ]:
+            btn = tk.Label(
+                coach_toggles, text="", padx=9, pady=4, cursor=HAND_CURSOR,
+                font=("Helvetica Neue", 10, "bold")
+            )
+            btn.pack(side="left", padx=3)
+            btn.bind("<Button-1>", lambda e, k=key_name, v=var_ref: self._toggle_coach_option(k, v))
+            self.coach_buttons[key_name] = btn
 
         sep = tk.Frame(stage_inner, bg=COLORS["border_subtle"], height=1)
-        sep.pack(fill="x", pady=(4, 16))
+        sep.pack(fill="x", pady=(2, 12))
 
+        # Bottom Controls: BPM + Tap Tempo + Play
         bottom_controls = tk.Frame(stage_inner, bg=COLORS["bg_card"])
         bottom_controls.pack(fill="x", side="bottom")
 
         bpm_box = tk.Frame(bottom_controls, bg=COLORS["bg_card"])
-        bpm_box.pack(side="left", fill="x", expand=True, padx=(0, 24))
+        bpm_box.pack(side="left", fill="x", expand=True, padx=(0, 20))
 
         bpm_header = tk.Frame(bpm_box, bg=COLORS["bg_card"])
         bpm_header.pack(fill="x", pady=(0, 6))
@@ -720,7 +891,7 @@ class RhythmMasterApp:
             bg_color=COLORS["bg_step"], hover_color="#3A3A44",
             command=lambda: self._adjust_bpm(-5)
         )
-        btn_minus.pack(side="left", padx=(0, 10))
+        btn_minus.pack(side="left", padx=(0, 8))
 
         self.bpm_slider = tk.Scale(
             slider_row, from_=40, to=200, orient="horizontal",
@@ -736,13 +907,21 @@ class RhythmMasterApp:
             bg_color=COLORS["bg_step"], hover_color="#3A3A44",
             command=lambda: self._adjust_bpm(5)
         )
-        btn_plus.pack(side="left", padx=(10, 0))
+        btn_plus.pack(side="left", padx=(8, 10))
+
+        self.btn_tap = RoundedButton(
+            slider_row, text="👆 Tap", width=78, height=34, radius=8,
+            bg_color="#2C2C35", hover_color="#3D3D4A",
+            fg_color="#64D2FF", font=("Helvetica Neue", 11, "bold"),
+            command=self._handle_tap_tempo
+        )
+        self.btn_tap.pack(side="left")
 
         play_box = tk.Frame(bottom_controls, bg=COLORS["bg_card"])
         play_box.pack(side="right")
 
         self.btn_play = RoundedButton(
-            play_box, text="", width=200, height=50, radius=14,
+            play_box, text="", width=200, height=48, radius=14,
             bg_color=COLORS["accent_green"], hover_color="#46E06D",
             fg_color="#000000", font=("Helvetica Neue", 15, "bold"),
             command=self._toggle_playback
@@ -753,7 +932,7 @@ class RhythmMasterApp:
             play_box, text="", bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
             font=("Helvetica Neue", 10)
         )
-        self.lbl_shortcut.pack(pady=(5, 0))
+        self.lbl_shortcut.pack(pady=(4, 0))
 
     def _redraw_panel(self, canvas, fill_color, border_color, radius=18):
         canvas.delete("panel_bg")
@@ -773,12 +952,58 @@ class RhythmMasterApp:
 
     def _set_language(self, lang_code):
         self.language.set(lang_code)
+        self._save_prefs()
         self._apply_language()
 
     def _set_category(self, cat_key):
         self.category_filter.set(cat_key)
         self._refresh_category_tabs()
         self._update_rhythm_list()
+
+    def _set_progression(self, prog_key):
+        self.progression_key.set(prog_key)
+        chords = CHORD_PROGRESSIONS[prog_key]["chords"]
+        self.audio.set_chord(chords[0])
+        self._update_chord_display(chords[0], chords[1 % len(chords)])
+        self._refresh_progression_tabs()
+
+    def _toggle_coach_option(self, key_name, var_ref):
+        var_ref.set(not var_ref.get())
+        self._refresh_coach_buttons()
+
+    def _toggle_favorite(self):
+        rid = self.current_rhythm_id
+        if rid in self.favorites:
+            self.favorites.remove(rid)
+        else:
+            self.favorites.add(rid)
+        self._save_prefs()
+        self._refresh_fav_star()
+        self._update_rhythm_list()
+
+    def _refresh_fav_star(self):
+        if self.current_rhythm_id in self.favorites:
+            self.btn_fav.config(text="★", fg=COLORS["accent_gold"])
+        else:
+            self.btn_fav.config(text="☆", fg=COLORS["text_secondary"])
+
+    def _handle_tap_tempo(self):
+        now = time.perf_counter()
+        if self.tap_timestamps and (now - self.tap_timestamps[-1]) > 2.2:
+            self.tap_timestamps.clear()
+        self.tap_timestamps.append(now)
+        if len(self.tap_timestamps) > 5:
+            self.tap_timestamps.pop(0)
+        if len(self.tap_timestamps) >= 2:
+            intervals = [
+                self.tap_timestamps[i] - self.tap_timestamps[i - 1]
+                for i in range(1, len(self.tap_timestamps))
+            ]
+            avg_interval = sum(intervals) / len(intervals)
+            if avg_interval > 0:
+                detected_bpm = max(40, min(200, int(round(60.0 / avg_interval))))
+                self.bpm.set(detected_bpm)
+                self._update_bpm_label(detected_bpm)
 
     def _refresh_sound_tabs(self):
         active = self.sound_mode.get()
@@ -804,17 +1029,48 @@ class RhythmMasterApp:
             else:
                 lbl.config(bg=COLORS["bg_step"], fg=COLORS["text_secondary"])
 
+    def _refresh_progression_tabs(self):
+        active = self.progression_key.get()
+        for key, lbl in self.prog_buttons.items():
+            if key == active:
+                lbl.config(bg=COLORS["accent_blue"], fg="#FFFFFF")
+            else:
+                lbl.config(bg=COLORS["bg_card"], fg=COLORS["text_secondary"])
+
+    def _refresh_coach_buttons(self):
+        states = {
+            "count_in": (self.count_in_enabled.get(), self._tr("coach_countin")),
+            "speed_trainer": (self.speed_trainer_enabled.get(), self._tr("coach_speed")),
+            "gap_click": (self.gap_click_enabled.get(), self._tr("coach_gap")),
+        }
+        for k, (enabled, label_txt) in states.items():
+            lbl = self.coach_buttons[k]
+            lbl.config(
+                text=label_txt,
+                bg=COLORS["accent_purple"] if enabled else COLORS["bg_step"],
+                fg="#FFFFFF" if enabled else COLORS["text_secondary"]
+            )
+
+    def _update_chord_display(self, curr_chord, next_chord):
+        self.lbl_curr_chord_val.config(text=curr_chord)
+        self.lbl_next_chord_val.config(text=next_chord)
+
     def _apply_language(self):
         self.root.title(self._tr("window_title"))
         self.lbl_header.config(text=self._tr("app_header"))
         self.lbl_subtitle.config(text=self._tr("app_subtitle"))
         self.lbl_bpm_title.config(text=self._tr("bpm_label"))
         self.lbl_shortcut.config(text=self._tr("shortcut_hint"))
+        self.lbl_prog_title.config(text=self._tr("prog_label"))
+        self.lbl_curr_chord_tag.config(text=f"{self._tr('curr_chord')}:")
+        self.lbl_next_chord_tag.config(text=f"{self._tr('next_chord')}:")
+        self.btn_tap.configure_style(text=self._tr("tap_btn"))
 
         self.sound_buttons["guitar"].config(text=f"🎸  {self._tr('sound_guitar')}")
         self.sound_buttons["percussion"].config(text=f"🥁  {self._tr('sound_perc')}")
         self.sound_buttons["metronome"].config(text=f"⏱  {self._tr('sound_metro')}")
 
+        self.cat_buttons["fav"].config(text=self._tr("cat_fav"))
         self.cat_buttons["all"].config(text=self._tr("cat_all"))
         self.cat_buttons["brazil"].config(text=self._tr("cat_brazil"))
         self.cat_buttons["general"].config(text=self._tr("cat_general"))
@@ -823,13 +1079,19 @@ class RhythmMasterApp:
         self._refresh_sound_tabs()
         self._refresh_language_tabs()
         self._refresh_category_tabs()
+        self._refresh_progression_tabs()
+        self._refresh_coach_buttons()
         self._rebuild_legend()
         self._update_bpm_label(self.bpm.get())
 
         if self.is_playing:
-            self.btn_play.configure_style(text=self._tr("btn_stop"), bg_color=COLORS["accent_red"], hover_color="#FF6961", fg_color="#FFFFFF")
+            self.btn_play.configure_style(
+                text=self._tr("btn_stop"), bg_color=COLORS["accent_red"], hover_color="#FF6961", fg_color="#FFFFFF"
+            )
         else:
-            self.btn_play.configure_style(text=self._tr("btn_play"), bg_color=COLORS["accent_green"], hover_color="#46E06D", fg_color="#000000")
+            self.btn_play.configure_style(
+                text=self._tr("btn_play"), bg_color=COLORS["accent_green"], hover_color="#46E06D", fg_color="#000000"
+            )
 
         self._update_rhythm_list()
         self._load_rhythm(self.current_rhythm_id, reset_bpm=False)
@@ -840,20 +1102,19 @@ class RhythmMasterApp:
 
         for color, label_text in self._tr("legend_items"):
             item = tk.Frame(self.legend_frame, bg=COLORS["bg_card"])
-            item.pack(side="left", padx=(0, 14))
+            item.pack(side="left", padx=(0, 10))
 
-            dot = tk.Canvas(item, width=10, height=10, bg=COLORS["bg_card"], highlightthickness=0)
-            dot.pack(side="left", padx=(0, 5))
-            dot.create_oval(1, 1, 9, 9, fill=color, outline="")
+            dot = tk.Canvas(item, width=9, height=9, bg=COLORS["bg_card"], highlightthickness=0)
+            dot.pack(side="left", padx=(0, 4))
+            dot.create_oval(1, 1, 8, 8, fill=color, outline="")
 
             tk.Label(
                 item, text=label_text, bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
-                font=("Helvetica Neue", 11)
+                font=("Helvetica Neue", 10)
             ).pack(side="left")
 
     @staticmethod
     def _normalize_sort_key(text):
-        """Removes accents and lowercases text for proper alphabetical sorting in PT and EN."""
         normalized = unicodedata.normalize("NFD", text)
         without_accents = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
         return without_accents.lower()
@@ -873,6 +1134,7 @@ class RhythmMasterApp:
 
             matches_cat = (
                 filter_val == "all" or
+                (filter_val == "fav" and rhythm_id in self.favorites) or
                 (filter_val == "brazil" and cat_en == "Brazil") or
                 (filter_val == "general" and cat_en == "General") or
                 (filter_val == "tech" and cat_en == "Technique")
@@ -882,12 +1144,12 @@ class RhythmMasterApp:
             if matches_cat and matches_search:
                 filtered_items.append((rhythm_id, name_local))
 
-        # Sort alphabetically according to the active language's name
         filtered_items.sort(key=lambda item: self._normalize_sort_key(item[1]))
 
         for rhythm_id, name_local in filtered_items:
             self.visible_keys.append(rhythm_id)
-            self.listbox.insert(tk.END, f"  {name_local}")
+            prefix = "★ " if rhythm_id in self.favorites else "   "
+            self.listbox.insert(tk.END, f"{prefix}{name_local}")
 
         if self.current_rhythm_id in self.visible_keys:
             idx = self.visible_keys.index(self.current_rhythm_id)
@@ -910,10 +1172,17 @@ class RhythmMasterApp:
         data = RHYTHMS[rhythm_id]
         locale_info = data[lang]
 
+        self._refresh_fav_star()
         self.lbl_rhythm_title.config(text=locale_info["name"])
+        self.lbl_bar_counter.config(text=f"{self._tr('bar_counter')} 1")
         self.badge_origin.config(text=f"{self._tr('origin_label')}: {locale_info['category']}")
         self.badge_sig.config(text=f"{self._tr('sig_label')}: {data['time_signature']}")
         self.lbl_description.config(text=locale_info["description"])
+
+        songs_str, tip_str = RHYTHM_COACHING.get(rhythm_id, DEFAULT_COACHING)[lang]
+        self.lbl_coaching.config(
+            text=f"🎵 {self._tr('songs_prefix')} {songs_str}   •   💡 {self._tr('tip_prefix')} {tip_str}"
+        )
 
         if reset_bpm:
             self.bpm.set(data["default_bpm"])
@@ -986,6 +1255,7 @@ class RhythmMasterApp:
             hover_color="#46E06D",
             fg_color="#000000"
         )
+        self.lbl_status_banner.config(text="")
         self._reset_cards()
 
     def _reset_cards(self):
@@ -998,6 +1268,13 @@ class RhythmMasterApp:
         for i, card in enumerate(self.step_cards):
             card.set_active(i == index)
 
+    def _update_bar_ui(self, bar_num, curr_chord, next_chord, banner_text, banner_color, session_id):
+        if not self.is_playing or session_id != self.play_session_id:
+            return
+        self.lbl_bar_counter.config(text=f"{self._tr('bar_counter')} {bar_num}")
+        self._update_chord_display(curr_chord, next_chord)
+        self.lbl_status_banner.config(text=banner_text, fg=banner_color)
+
     def _get_step_interval(self, bpm_val, time_sig, total_steps):
         seconds_per_beat = 60.0 / bpm_val
         if time_sig in ["2/4", "4/4"]:
@@ -1007,44 +1284,93 @@ class RhythmMasterApp:
             return seconds_per_beat / 3.0 if total_steps == 6 else seconds_per_beat
         return seconds_per_beat * 0.5
 
+    def _get_beats_per_bar(self, time_sig):
+        try:
+            return int(time_sig.split("/")[0])
+        except Exception:
+            return 4
+
+    def _sleep_until(self, target_time, session_id):
+        now = time.perf_counter()
+        remaining = target_time - now
+        if remaining > 0.002:
+            time.sleep(remaining - 0.0015)
+        while self.is_playing and session_id == self.play_session_id and time.perf_counter() < target_time:
+            pass
+
     def _metronome_loop(self, session_id):
         data = RHYTHMS[self.current_rhythm_id]
         sounds = data["sounds"]
         counts = data["count"]
         total_steps = len(sounds)
         time_sig = data["time_signature"]
-        step = 0
 
+        # 1. Optional 1-Bar Count-in before entering the groove
+        if self.count_in_enabled.get():
+            beats_count_in = self._get_beats_per_bar(time_sig)
+            next_tick = time.perf_counter()
+            for b in range(beats_count_in):
+                if not self.is_playing or session_id != self.play_session_id:
+                    return
+                self.audio.play_metronome_click(accent=(b == 0))
+                banner = f"{self._tr('count_in_banner')}:   {b + 1} / {beats_count_in}"
+                self.root.after(0, lambda txt=banner: self.lbl_status_banner.config(text=txt, fg=COLORS["accent_orange"]))
+                next_tick += 60.0 / self.bpm.get()
+                self._sleep_until(next_tick, session_id)
+
+        step = 0
+        bar_index = 0
         next_tick_time = time.perf_counter()
 
         while self.is_playing and session_id == self.play_session_id:
-            if self.sound_mode.get() == "metronome":
-                # Click only on main beat numbers ("1", "2", "3", "4", etc.)
-                if step == 0:
-                    self.audio.play("M_ACCENT")
-                elif counts[step].isdigit():
-                    self.audio.play("M_BEAT")
-            else:
-                sound = sounds[step]
-                if sound:
-                    self.audio.play(sound)
+            if step == 0:
+                # Speed Trainer: +5 BPM every 4 completed bars
+                if bar_index > 0 and self.speed_trainer_enabled.get() and (bar_index % 4 == 0):
+                    new_bpm = min(200, self.bpm.get() + 5)
+                    self.root.after(0, lambda v=new_bpm: (self.bpm.set(v), self._update_bpm_label(v)))
+
+                # Chord Progression calculation
+                chords = CHORD_PROGRESSIONS[self.progression_key.get()]["chords"]
+                curr_chord = chords[bar_index % len(chords)]
+                next_chord = chords[(bar_index + 1) % len(chords)]
+                self.audio.set_chord(curr_chord)
+
+                # Gap Click: 2 bars audible, 1 bar muted (every 3rd bar)
+                is_gap_muted = self.gap_click_enabled.get() and (bar_index % 3 == 2)
+                banner_txt = self._tr("gap_muted_banner") if is_gap_muted else ""
+                banner_col = COLORS["accent_red"] if is_gap_muted else COLORS["accent_orange"]
+
+                self.root.after(
+                    0, self._update_bar_ui, bar_index + 1, curr_chord, next_chord, banner_txt, banner_col, session_id
+                )
+
+            is_gap_muted = self.gap_click_enabled.get() and (bar_index % 3 == 2)
+
+            if not is_gap_muted:
+                if self.sound_mode.get() == "metronome":
+                    if step == 0:
+                        self.audio.play("M_ACCENT")
+                    elif counts[step].isdigit():
+                        self.audio.play("M_BEAT")
+                else:
+                    sound = sounds[step]
+                    if sound:
+                        self.audio.play(sound)
 
             self.root.after(0, self._highlight_step, step, session_id)
 
             interval = self._get_step_interval(self.bpm.get(), time_sig, total_steps)
             next_tick_time += interval
-            step = (step + 1) % total_steps
+            step += 1
+            if step >= total_steps:
+                step = 0
+                bar_index += 1
 
             now = time.perf_counter()
-            remaining = next_tick_time - now
-
-            if remaining < -0.1:
+            if next_tick_time - now < -0.1:
                 next_tick_time = now
-            elif remaining > 0.002:
-                time.sleep(remaining - 0.0015)
-
-            while self.is_playing and session_id == self.play_session_id and time.perf_counter() < next_tick_time:
-                pass
+            else:
+                self._sleep_until(next_tick_time, session_id)
 
 
 if __name__ == "__main__":
