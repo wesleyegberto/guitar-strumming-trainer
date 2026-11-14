@@ -907,4 +907,96 @@ RHYTHMS = {
         "arrows": ["↓ (B)", "-", "↓ (T)", "↓ (T)", "↓ (B)", "↑", "↓ (S)", "↑"],
         "sounds": ["B", None, "T", "T", "B", "U", "S", "U"]
     },
+
+    # ==================== TECHNICAL INDEPENDENCE EXERCISES ====================
+    "tech_thumb_independence": {
+        "pt": {
+            "name": "Exercício 1: Independência de Polegar",
+            "category": "Técnica",
+            "description": "Polegar constante nos 4 tempos (1, 2, 3, 4) enquanto as puxadas respondem nos contratempos."
+        },
+        "en": {
+            "name": "Exercise 1: Thumb Independence",
+            "category": "Technique",
+            "description": "Steady thumb on all 4 beats while upstrokes answer on syncopated offbeats."
+        },
+        "time_signature": "4/4",
+        "default_bpm": 84,
+        "subdivision": 8,
+        "count": ["1", "e", "2", "e", "3", "e", "4", "e"],
+        "arrows": ["↓ (B)", "-", "↓ (B)", "↑", "↓ (B)", "↑", "↓ (B)", "-"],
+        "sounds": ["B", None, "B", "U", "B", "U", "B", None]
+    },
+    "tech_accent_shift_16th": {
+        "pt": {
+            "name": "Exercício 2: Deslocamento de Acento (16 avos)",
+            "category": "Técnica",
+            "description": "Pêndulo contínuo em semicolcheias deslocando o tapa percussivo para fora da cabeça do tempo."
+        },
+        "en": {
+            "name": "Exercise 2: 16th-Note Accent Shift",
+            "category": "Technique",
+            "description": "Continuous 16th-note pendulum shifting percussive slaps off the main beats."
+        },
+        "time_signature": "4/4",
+        "default_bpm": 78,
+        "subdivision": 16,
+        "count": ["1", "e", "n", "a", "2", "e", "n", "a", "3", "e", "n", "a", "4", "e", "n", "a"],
+        "arrows": ["↓ (B)", "↑", "↓ (T)", "↑", "↓ (T)", "↑", "↓ (S)", "↑", "↓ (T)", "↑", "↓ (T)", "↑", "↓ (T)", "↑", "↓ (T)", "↑ (S)"],
+        "sounds": ["B", "U", "T", "U", "T", "U", "S", "U", "T", "U", "T", "U", "T", "U", "T", "S"]
+    },
+    "tech_tresillo_3_3_2": {
+        "pt": {
+            "name": "Exercício 3: Polirritmia Cruzada (3 + 3 + 2)",
+            "category": "Técnica",
+            "description": "Agrupamento assimétrico dentro do 4/4 (clave tresillo), essencial para música brasileira e latina."
+        },
+        "en": {
+            "name": "Exercise 3: Cross-Rhythm Grouping (3 + 3 + 2)",
+            "category": "Technique",
+            "description": "Asymmetric grouping inside 4/4 (tresillo clave), essential for Brazilian and Latin grooves."
+        },
+        "time_signature": "4/4",
+        "default_bpm": 96,
+        "subdivision": 8,
+        "count": ["1", "e", "2", "e", "3", "e", "4", "e"],
+        "arrows": ["↓ (B)", "↑", "↑", "↓ (S)", "↑", "↑", "↓ (T)", "↑"],
+        "sounds": ["B", "U", "U", "S", "U", "U", "T", "U"]
+    },
+    "tech_staccato_mute": {
+        "pt": {
+            "name": "Exercício 4: Controle de Abafamento Seco",
+            "category": "Técnica",
+            "description": "Alternância rápida entre acordes abertos e cortes secos para precisão entre as duas mãos."
+        },
+        "en": {
+            "name": "Exercise 4: Crisp Mute & Staccato Control",
+            "category": "Technique",
+            "description": "Rapid alternation between open chords and dead-note slaps for two-hand synchronization."
+        },
+        "time_signature": "4/4",
+        "default_bpm": 92,
+        "subdivision": 8,
+        "count": ["1", "e", "2", "e", "3", "e", "4", "e"],
+        "arrows": ["↓ (B)", "↓ (S)", "↑", "↓ (S)", "↓ (T)", "↓ (S)", "↑", "↓ (S)"],
+        "sounds": ["B", "S", "U", "S", "T", "S", "U", "S"]
+    },
+    "tech_upstroke_syncopation": {
+        "pt": {
+            "name": "Exercício 5: Puxadas Sincopadas (Contratempo)",
+            "category": "Técnica",
+            "description": "Treina a resistência e clareza das puxadas para cima (↑) sem apoiar nas descidas."
+        },
+        "en": {
+            "name": "Exercise 5: Syncopated Upstroke Endurance",
+            "category": "Technique",
+            "description": "Builds upstroke clarity and endurance without relying on downbeat strums."
+        },
+        "time_signature": "4/4",
+        "default_bpm": 88,
+        "subdivision": 8,
+        "count": ["1", "e", "2", "e", "3", "e", "4", "e"],
+        "arrows": ["↓ (B)", "↑", "-", "↑", "-", "↑", "-", "↑"],
+        "sounds": ["B", "U", None, "U", None, "U", None, "U"]
+    },
 }

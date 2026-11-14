@@ -33,6 +33,7 @@ UI_TEXTS = {
         "cat_all": "All",
         "cat_brazil": "Brazil",
         "cat_general": "General",
+        "cat_tech": "Technique",
         "origin_label": "Origin",
         "sig_label": "Time Signature",
         "legend_items": [
@@ -57,6 +58,7 @@ UI_TEXTS = {
         "cat_all": "Todos",
         "cat_brazil": "Brasil",
         "cat_general": "Geral",
+        "cat_tech": "Técnica",
         "origin_label": "Origem",
         "sig_label": "Compasso",
         "legend_items": [
@@ -610,7 +612,7 @@ class RhythmMasterApp:
         cat_bar = tk.Frame(sidebar_inner, bg=COLORS["bg_step"], padx=3, pady=3)
         cat_bar.pack(fill="x", pady=(0, 12))
 
-        for cat_key in ["all", "brazil", "general"]:
+        for cat_key in ["all", "brazil", "general", "tech"]:
             lbl = tk.Label(
                 cat_bar, text="", pady=6, cursor=HAND_CURSOR,
                 font=("Helvetica Neue", 11, "bold")
@@ -816,6 +818,7 @@ class RhythmMasterApp:
         self.cat_buttons["all"].config(text=self._tr("cat_all"))
         self.cat_buttons["brazil"].config(text=self._tr("cat_brazil"))
         self.cat_buttons["general"].config(text=self._tr("cat_general"))
+        self.cat_buttons["tech"].config(text=self._tr("cat_tech"))
 
         self._refresh_sound_tabs()
         self._refresh_language_tabs()
@@ -871,7 +874,8 @@ class RhythmMasterApp:
             matches_cat = (
                 filter_val == "all" or
                 (filter_val == "brazil" and cat_en == "Brazil") or
-                (filter_val == "general" and cat_en == "General")
+                (filter_val == "general" and cat_en == "General") or
+                (filter_val == "tech" and cat_en == "Technique")
             )
             matches_search = (not query) or (query in name_local.lower())
 
