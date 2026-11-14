@@ -28,7 +28,7 @@ setup:
 .PHONY: run
 run:
 	@echo "Starting $(APP_NAME) in development mode..."
-	$(VENV_PYTHON) main.py
+	TK_SILENCE_DEPRECATION=1 $(VENV_PYTHON) main.py
 
 # 3. Build the native macOS .app bundle
 .PHONY: build
@@ -40,6 +40,7 @@ build: setup clean-build
 # 4. Install the application into macOS /Applications
 .PHONY: install
 install: build
+	codesign --force --deep --sign - "dist/$(APP_NAME).app"
 	@echo "Copying '$(APP_NAME).app' to /Applications..."
 	rm -rf "/Applications/$(APP_NAME).app"
 	cp -R "dist/$(APP_NAME).app" "/Applications/"

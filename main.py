@@ -24,10 +24,17 @@ from practice_data import (
 )
 
 try:
-    from AppKit import NSSound
+    from AppKit import NSSound, NSProcessInfo
     HAS_NSSOUND = True
 except ImportError:
     HAS_NSSOUND = False
+
+try:
+    from AVFoundation import AVAudioPlayer
+    from Foundation import NSURL
+    HAS_AVAUDIO = True
+except ImportError:
+    HAS_AVAUDIO = False
 
 HAND_CURSOR = "pointinghand"
 PREFS_PATH = os.path.expanduser("~/.rhythm_master_prefs.json")
@@ -313,7 +320,21 @@ class StepCard(tk.Canvas):
     def set_active(self, active):
         if self.is_active != active:
             self.is_active = active
-            self._redraw()
+            self._update_colors()
+
+    def _update_colors(self):
+        if not self.find_withtag("card_bg"):
+            return
+        bg = COLORS["bg_step_active"] if self.is_active else COLORS["bg_step"]
+        outline = "#5AC8FA" if self.is_active else COLORS["border_subtle"]
+        count_fg = "#FFFFFF" if self.is_active else COLORS["text_secondary"]
+        arrow_fg = "#FFFFFF" if self.is_active else (COLORS["text_primary"] if self.arrow_text != "-" else "#55555E")
+        pill_color = "#FFFFFF" if self.is_active else self.indicator_color
+
+        self.itemconfig("card_bg", fill=bg, outline=outline)
+        self.itemconfig("card_pill", fill=pill_color)
+        self.itemconfig("card_count", fill=count_fg)
+        self.itemconfig("card_arrow", fill=arrow_fg)
 
     def _redraw(self, event=None):
         self.delete("all")
@@ -341,15 +362,21 @@ class StepCard(tk.Canvas):
             count_font_size = 11
             radius = 14
 
-        draw_rounded_rect(self, 1, 2, w - 1, h - 2, radius=radius, fill=bg, outline=outline, width=1.5)
+        draw_rounded_rect(
+            self, 1, 2, w - 1, h - 2, radius=radius,
+            fill=bg, outline=outline, width=1.5, tags="card_bg"
+        )
 
         pill_w = max(12, min(28, w * 0.48))
         pill_color = "#FFFFFF" if self.is_active else self.indicator_color
-        draw_rounded_rect(self, (w - pill_w) / 2, 12, (w + pill_w) / 2, 17, radius=3, fill=pill_color, outline="")
+        draw_rounded_rect(
+            self, (w - pill_w) / 2, 12, (w + pill_w) / 2, 17, radius=3,
+            fill=pill_color, outline="", tags="card_pill"
+        )
 
         self.create_text(
             w / 2, 36, text=self.count_text, fill=count_fg,
-            font=("Helvetica Neue", count_font_size, "bold")
+            font=("Helvetica Neue", count_font_size, "bold"), tags="card_count"
         )
 
         display_arrow = self.arrow_text
@@ -360,7 +387,7 @@ class StepCard(tk.Canvas):
 
         self.create_text(
             w / 2, 80, text=display_arrow, fill=arrow_fg, justify="center",
-            font=("Helvetica Neue", arrow_font_size, "bold")
+            font=("Helvetica Neue", arrow_font_size, "bold"), tags="card_arrow"
         )
 
 
@@ -391,7 +418,19 @@ class MacNativeAudioEngine:
         self.sound_pools = {"guitar": {}, "percussion": {}, "metronome": {}}
         self.pool_indices = {"guitar": {}, "percussion": {}, "metronome": {}}
 
-        if HAS_NSSOUND:
+        if HAS_AVAUDIO:
+            for mode_name, paths in self.files.items():
+                for key, path in paths.items():
+                    voices = []
+                    url = NSURL.fileURLWithPath_(path)
+                    for _ in range(pool_size):
+                        player, _ = AVAudioPlayer.alloc().initWithContentsOfURL_error_(url, None)
+                        if player:
+                            player.prepareToPlay()
+                            voices.append(player)
+                    self.sound_pools[mode_name][key] = voices
+                    self.pool_indices[mode_name][key] = 0
+        elif HAS_NSSOUND:
             for mode_name, paths in self.files.items():
                 for key, path in paths.items():
                     voices = []
@@ -571,13 +610,18 @@ class MacNativeAudioEngine:
     def _play_key(self, mode, key):
         if key not in self.files[mode]:
             return
-        if HAS_NSSOUND and key in self.sound_pools[mode] and self.sound_pools[mode][key]:
+        pool = self.sound_pools[mode].get(key)
+        if pool:
             idx = self.pool_indices[mode][key]
-            snd = self.sound_pools[mode][key][idx]
-            self.pool_indices[mode][key] = (idx + 1) % len(self.sound_pools[mode][key])
-            snd.stop()
-            snd.setCurrentTime_(0.0)
-            snd.play()
+            voice = pool[idx]
+            self.pool_indices[mode][key] = (idx + 1) % len(pool)
+            if HAS_AVAUDIO:
+                voice.setCurrentTime_(0.0)
+                voice.play()
+            else:
+                voice.stop()
+                voice.setCurrentTime_(0.0)
+                voice.play()
         else:
             subprocess.Popen(["afplay", self.files[mode][key]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -589,6 +633,14 @@ class RhythmMasterApp:
         self.root.minsize(1060, 700)
         self.root.configure(bg=COLORS["bg_main"])
 
+        if HAS_NSSOUND:
+            try:
+                self._activity = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(
+                    0x00FFFFFF, "High-precision audio rhythm playback"
+                )
+            except Exception:
+                pass
+
         self.prefs = self._load_prefs()
         self.favorites = set(self.prefs.get("favorites", []))
 
@@ -599,15 +651,24 @@ class RhythmMasterApp:
         self.current_rhythm_id = "traditional_samba"
         self.visible_keys = []
 
-        # Harmony States
+        # Harmony & Coaching States
         self.count_in_enabled = tk.BooleanVar(value=True)
         self.speed_trainer_enabled = tk.BooleanVar(value=False)
         self.gap_click_enabled = tk.BooleanVar(value=False)
         self.bars_per_chord = tk.IntVar(value=1)
 
-        self.harmony_type = tk.StringVar(value="fixed")  # "fixed", "prog_maj", "prog_min", "genre"
-        self.harmony_val1 = tk.StringVar(value="Am7")   # Acorde fixo, Tônica Maior/Menor ou Gênero
-        self.harmony_val2 = tk.StringVar(value="major_axis") # Formato da progressão
+        self.harmony_type = tk.StringVar(value="fixed")
+        self.harmony_val1 = tk.StringVar(value="Am7")
+        self.harmony_val2 = tk.StringVar(value="major_axis")
+
+        # Pure Python atomic cache for audio thread (avoids Tcl/Tkinter lock contention)
+        self.cached_bpm = 96
+        self.cached_sound_mode = "guitar"
+        self.cached_count_in = True
+        self.cached_speed_trainer = False
+        self.cached_gap_click = False
+        self.cached_bars_per_chord = 1
+        self.cached_chords = ["Am7"]
 
         self.tap_timestamps = []
 
@@ -665,19 +726,23 @@ class RhythmMasterApp:
         v2 = self.harmony_val2.get()
 
         if htype == "fixed":
-            return [v1 if v1 in CHORD_VOICINGS else "Am7"]
+            chords = [v1 if v1 in CHORD_VOICINGS else "Am7"]
         elif htype == "prog_maj":
             field = HARMONIC_FIELDS_MAJOR.get(v1, HARMONIC_FIELDS_MAJOR["C"])
             template = PROGRESSION_TEMPLATES.get(v2, PROGRESSION_TEMPLATES["major_axis"])
-            return [field[d] for d in template["degrees"]]
+            chords = [field[d] for d in template["degrees"]]
         elif htype == "prog_min":
             field = HARMONIC_FIELDS_MINOR.get(v1, HARMONIC_FIELDS_MINOR["Am"])
             template = PROGRESSION_TEMPLATES.get(v2, PROGRESSION_TEMPLATES["minor_standard"])
-            return [field[d] for d in template["degrees"]]
+            chords = [field[d] for d in template["degrees"]]
         elif htype == "genre":
             genre_data = GENRE_PROGRESSIONS.get(v1, GENRE_PROGRESSIONS["pop"])
-            return genre_data["chords"]
-        return ["Am7"]
+            chords = genre_data["chords"]
+        else:
+            chords = ["Am7"]
+
+        self.cached_chords = chords
+        return chords
 
     def _build_ui(self):
         # ==================== HEADER ====================
@@ -868,7 +933,7 @@ class RhythmMasterApp:
         )
         self.lbl_tip_line.pack(fill="x")
 
-        # 3. Harmony Selector Bar (Type + Sub-selectors + High-contrast Text)
+        # 3. Harmony Selector Bar
         harmony_bar = tk.Frame(stage_inner, bg=COLORS["bg_subpanel"], padx=14, pady=10)
         harmony_bar.pack(fill="x", pady=(0, 10))
 
@@ -884,7 +949,6 @@ class RhythmMasterApp:
         prog_controls_row = tk.Frame(left_prog, bg=COLORS["bg_subpanel"])
         prog_controls_row.pack(anchor="w")
 
-        # Estilo visual de OptionMenu com texto PRETO e fundo claro para legibilidade total
         menu_config = {
             "bg": "#E4E4E6", "fg": "#000000",
             "activebackground": COLORS["accent_blue"], "activeforeground": "#FFFFFF",
@@ -897,28 +961,24 @@ class RhythmMasterApp:
             "font": ("Helvetica Neue", 11)
         }
 
-        # Menu 1: Tipo de Harmonia (Fixo, Prog Maior, Prog Menor, Gênero)
         self.harmony_type_display = tk.StringVar(value="")
         self.menu_harmony_type = tk.OptionMenu(prog_controls_row, self.harmony_type_display, "", command=self._on_harmony_type_change)
         self.menu_harmony_type.config(**menu_config)
         self.menu_harmony_type["menu"].config(**menu_dropdown_config)
         self.menu_harmony_type.pack(side="left", padx=(0, 6))
 
-        # Menu 2: Valor 1 (Acorde, Tônica ou Gênero)
         self.harmony_val1_display = tk.StringVar(value="")
         self.menu_harmony_val1 = tk.OptionMenu(prog_controls_row, self.harmony_val1_display, "", command=self._on_harmony_val1_change)
         self.menu_harmony_val1.config(**menu_config)
         self.menu_harmony_val1["menu"].config(**menu_dropdown_config)
         self.menu_harmony_val1.pack(side="left", padx=(0, 6))
 
-        # Menu 3: Valor 2 (Formato da Progressão ex: I-V-vi-IV) - Visível apenas para Progressões
         self.harmony_val2_display = tk.StringVar(value="")
         self.menu_harmony_val2 = tk.OptionMenu(prog_controls_row, self.harmony_val2_display, "", command=self._on_harmony_val2_change)
         self.menu_harmony_val2.config(**menu_config)
         self.menu_harmony_val2["menu"].config(**menu_dropdown_config)
         self.menu_harmony_val2.pack(side="left", padx=(0, 6))
 
-        # Botão Compassos por Acorde (1x / 2x)
         self.btn_bars_per_chord = tk.Label(
             prog_controls_row, text="", bg=COLORS["bg_step"], fg="#64D2FF",
             font=("Helvetica Neue", 10, "bold"), padx=10, pady=5, cursor=HAND_CURSOR
@@ -1104,6 +1164,7 @@ class RhythmMasterApp:
 
     def _set_sound_mode(self, mode):
         self.sound_mode.set(mode)
+        self.cached_sound_mode = mode
         self.audio.set_mode(mode)
         self._refresh_sound_tabs()
 
@@ -1118,7 +1179,6 @@ class RhythmMasterApp:
         self._update_rhythm_list()
 
     def _rebuild_harmony_menus(self):
-        # 1. Menu Tipo de Harmonia
         type_menu = self.menu_harmony_type["menu"]
         type_menu.delete(0, "end")
         type_map = {
@@ -1133,7 +1193,6 @@ class RhythmMasterApp:
         curr_type = self.harmony_type.get()
         self.harmony_type_display.set(type_map.get(curr_type, type_map["fixed"]))
 
-        # 2. Menu Val1 (Acordes, Tônicas ou Gêneros)
         val1_menu = self.menu_harmony_val1["menu"]
         val1_menu.delete(0, "end")
 
@@ -1155,7 +1214,6 @@ class RhythmMasterApp:
                 self.harmony_val1.set(choices[0])
             self.harmony_val1_display.set(self.harmony_val1.get())
 
-            # Reconstroi Menu Val2 (Templates de Progressão)
             val2_menu = self.menu_harmony_val2["menu"]
             val2_menu.delete(0, "end")
             for t_key, t_data in PROGRESSION_TEMPLATES.items():
@@ -1209,13 +1267,19 @@ class RhythmMasterApp:
         self.audio.set_chord(chords[0])
         self._update_chord_display(chords[0], chords[1 % len(chords)])
 
-    def _on_harmony_type_change(self, val): pass
-    def _on_harmony_val1_change(self, val): pass
-    def _on_harmony_val2_change(self, val): pass
+    def _on_harmony_type_change(self, val):
+        pass
+
+    def _on_harmony_val1_change(self, val):
+        pass
+
+    def _on_harmony_val2_change(self, val):
+        pass
 
     def _toggle_bars_per_chord(self):
         new_val = 2 if self.bars_per_chord.get() == 1 else 1
         self.bars_per_chord.set(new_val)
+        self.cached_bars_per_chord = new_val
         self._refresh_bars_per_chord_label()
 
     def _refresh_bars_per_chord_label(self):
@@ -1223,7 +1287,14 @@ class RhythmMasterApp:
         self.btn_bars_per_chord.config(text=txt)
 
     def _toggle_coach_option(self, key_name, var_ref):
-        var_ref.set(not var_ref.get())
+        new_state = not var_ref.get()
+        var_ref.set(new_state)
+        if key_name == "count_in":
+            self.cached_count_in = new_state
+        elif key_name == "speed_trainer":
+            self.cached_speed_trainer = new_state
+        elif key_name == "gap_click":
+            self.cached_gap_click = new_state
         self._refresh_coach_buttons()
 
     def _toggle_favorite(self):
@@ -1463,12 +1534,14 @@ class RhythmMasterApp:
             self._start()
 
     def _adjust_bpm(self, delta):
-        new_val = max(40, min(200, self.bpm.get() + delta))
+        new_val = max(40, min(200, self.cached_bpm + delta))
         self.bpm.set(new_val)
         self._update_bpm_label(new_val)
 
     def _update_bpm_label(self, value):
-        self.lbl_bpm_val.config(text=f"{int(float(value))} BPM")
+        bpm_int = int(float(value))
+        self.cached_bpm = bpm_int
+        self.lbl_bpm_val.config(text=f"{bpm_int} BPM")
 
     def _toggle_playback(self):
         if self.is_playing:
@@ -1480,6 +1553,15 @@ class RhythmMasterApp:
         self.is_playing = True
         self.play_session_id += 1
         session_id = self.play_session_id
+
+        # Refresh pure-Python cache before starting thread
+        self.cached_bpm = int(self.bpm.get())
+        self.cached_sound_mode = self.sound_mode.get()
+        self.cached_count_in = self.count_in_enabled.get()
+        self.cached_speed_trainer = self.speed_trainer_enabled.get()
+        self.cached_gap_click = self.gap_click_enabled.get()
+        self.cached_bars_per_chord = self.bars_per_chord.get()
+        self._get_active_chord_list()
 
         self.btn_play.configure_style(
             text=self._tr("btn_stop"),
@@ -1539,12 +1621,14 @@ class RhythmMasterApp:
             return 4
 
     def _sleep_until(self, target_time, session_id):
-        now = time.perf_counter()
-        remaining = target_time - now
-        if remaining > 0.002:
-            time.sleep(remaining - 0.0015)
-        while self.is_playing and session_id == self.play_session_id and time.perf_counter() < target_time:
-            pass
+        while self.is_playing and session_id == self.play_session_id:
+            remaining = target_time - time.perf_counter()
+            if remaining <= 0.0003:
+                break
+            if remaining > 0.003:
+                time.sleep(remaining - 0.002)
+            else:
+                time.sleep(0.0002)
 
     def _metronome_loop(self, session_id):
         data = RHYTHMS[self.current_rhythm_id]
@@ -1553,7 +1637,7 @@ class RhythmMasterApp:
         total_steps = len(sounds)
         time_sig = data["time_signature"]
 
-        if self.count_in_enabled.get():
+        if self.cached_count_in:
             beats_count_in = self._get_beats_per_bar(time_sig)
             next_tick = time.perf_counter()
             for b in range(beats_count_in):
@@ -1561,8 +1645,10 @@ class RhythmMasterApp:
                     return
                 self.audio.play_metronome_click(accent=(b == 0))
                 banner = f"{self._tr('count_in_banner')}:   {b + 1} / {beats_count_in}"
-                self.root.after(0, lambda txt=banner: self.lbl_status_banner.config(text=txt, fg=COLORS["accent_orange"]))
-                next_tick += 60.0 / self.bpm.get()
+                self.root.after_idle(
+                    lambda txt=banner: self.lbl_status_banner.config(text=txt, fg=COLORS["accent_orange"])
+                )
+                next_tick += 60.0 / self.cached_bpm
                 self._sleep_until(next_tick, session_id)
 
         step = 0
@@ -1570,43 +1656,47 @@ class RhythmMasterApp:
         next_tick_time = time.perf_counter()
 
         while self.is_playing and session_id == self.play_session_id:
-            if step == 0:
-                if bar_index > 0 and self.speed_trainer_enabled.get() and (bar_index % 4 == 0):
-                    new_bpm = min(200, self.bpm.get() + 5)
-                    self.root.after(0, lambda v=new_bpm: (self.bpm.set(v), self._update_bpm_label(v)))
+            bpm_now = self.cached_bpm
+            interval = self._get_step_interval(bpm_now, time_sig, total_steps)
+            is_gap_muted = self.cached_gap_click and (bar_index % 3 == 2)
 
-                chords = self._get_active_chord_list()
-                bpc = self.bars_per_chord.get()
+            if step == 0:
+                if bar_index > 0 and self.cached_speed_trainer and (bar_index % 4 == 0):
+                    new_bpm = min(200, bpm_now + 5)
+                    self.cached_bpm = new_bpm
+                    interval = self._get_step_interval(new_bpm, time_sig, total_steps)
+                    self.root.after_idle(
+                        lambda v=new_bpm: (self.bpm.set(v), self._update_bpm_label(v))
+                    )
+
+                chords = self.cached_chords
+                bpc = self.cached_bars_per_chord
                 chord_step_idx = (bar_index // bpc) % len(chords)
                 next_chord_idx = ((bar_index + bpc) // bpc) % len(chords)
                 curr_chord = chords[chord_step_idx]
                 next_chord = chords[next_chord_idx]
                 self.audio.set_chord(curr_chord)
 
-                is_gap_muted = self.gap_click_enabled.get() and (bar_index % 3 == 2)
                 banner_txt = self._tr("gap_muted_banner") if is_gap_muted else ""
                 banner_col = COLORS["accent_red"] if is_gap_muted else COLORS["accent_orange"]
 
-                self.root.after(
-                    0, self._update_bar_ui, bar_index + 1, curr_chord, next_chord, banner_txt, banner_col, session_id
+                self.root.after_idle(
+                    self._update_bar_ui, bar_index + 1, curr_chord, next_chord, banner_txt, banner_col, session_id
                 )
 
-            is_gap_muted = self.gap_click_enabled.get() and (bar_index % 3 == 2)
-
             if not is_gap_muted:
-                if self.sound_mode.get() == "metronome":
+                if self.cached_sound_mode == "metronome":
                     if step == 0:
-                        self.audio.play("M_ACCENT")
+                        self.audio.play_metronome_click(accent=True)
                     elif counts[step].isdigit():
-                        self.audio.play("M_BEAT")
+                        self.audio.play_metronome_click(accent=False)
                 else:
                     sound = sounds[step]
                     if sound:
                         self.audio.play(sound)
 
-            self.root.after(0, self._highlight_step, step, session_id)
+            self.root.after_idle(self._highlight_step, step, session_id)
 
-            interval = self._get_step_interval(self.bpm.get(), time_sig, total_steps)
             next_tick_time += interval
             step += 1
             if step >= total_steps:

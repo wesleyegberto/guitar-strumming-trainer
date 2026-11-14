@@ -14,7 +14,16 @@ OPTIONS = {
         'CFBundleVersion': "1.0.0",
         'CFBundleShortVersionString': "1.0.0",
         'NSHighResolutionCapable': True,
-    }
+    },
+    "includes": [
+        "_math_integer",
+        "practice_data",
+        "rhythms_db",
+        "AVFoundation",
+        "Foundation",
+        "AppKit",
+    ],
+    "packages": ["AVFoundation", "Foundation", "AppKit", "objc"]
 }
 
 setup(
