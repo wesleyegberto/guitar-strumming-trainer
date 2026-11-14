@@ -1,6 +1,6 @@
 # Rhythm Master — Interactive Strumming & Rhythm Trainer for macOS
 
-**Rhythm Master** is a native macOS desktop application built with Python and Tkinter to help guitarists and musicians practice strumming patterns, subdivisions, and rhythmic grooves—featuring a comprehensive library of **Brazilian rhythms** alongside essential international styles.
+**Rhythm Master** is a desktop application to help guitarists and musicians practice strumming patterns, subdivisions, and rhythmic grooves—featuring a comprehensive library of **Brazilian rhythms** alongside essential international styles.
 
 ![](screenshot-1.png)
 
@@ -8,23 +8,24 @@
 
 ## Features
 
-- **3 Switchable Audio Engines:**
-  - **Acoustic Guitar (Karplus-Strong Physical Modeling):** Synthesizes realistic plucked/strummed acoustic guitar strings in pure Python (Bass/Thumb, Treble/Fingers, Upstroke, and Palm Mute/Slap) with zero external audio files.
-  - **Percussion:** Synthesized kick, snare, hi-hat, and rim/slap grooves.
-  - **Metronome:** Crisp woodblock-style clicks marking main beats with an accented Beat 1.
-- **Zero-Latency Native macOS Audio:** Pre-loads synthesized WAV buffers into RAM via `AppKit.NSSound` (CoreAudio) with a round-robin voice pool and a drift-free monotonic clock (`time.perf_counter()`).
-- **Rich Rhythm Library (27+ Patterns):**
-  - **Brazilian Rhythms:** Traditional Samba, Bossa Nova, Partido Alto, Pagode, Baião, Xote, Arrasta-pé, Maracatu, Frevo, Ijexá, Axé / Samba-Reggae, Choro, Maxixe, Carimbó, Vanerão, Chamamé, Moda de Viola, Carioca Funk (Tamborzão), and Brega.
-  - **General / International:** Pop/Rock, Ballad/Folk, Waltz (3/4), Guarânia, Reggae (Offbeat), Blues Shuffle (12/8), Funk/Groove (16th-note syncopation), and Bolero.
-- **Bilingual UI (PT / EN):** Instant live switching between Portuguese and English, including locale-aware alphabetical sorting and real-time search.
-- **Responsive Visual Beat Grid:** Color-coded subdivision cards that scale dynamically and highlight in sync with the audio engine.
-- **Native `.app` Bundling:** Includes `py2app` configuration and a `Makefile` to build and install a standalone macOS `.app` bundle.
+- **Multiple Harmony Modes:**
+  - **Fixed Chord:** Freely choose any chord from the catalog to practice individual bars.
+  - **Major & Minor Progressions:** Select the harmonic field (tonic key) and structural format (e.g., *I - V - vi - IV* or *i - VI - III - VII*) automatically generated for you.
+  - **Music Genres:** Instantly switch between characteristic progressions for Pop/Rock, Bossa Nova, Samba, Baião, and Blues.
+- **Real-Time Karplus-Strong Synthesizer:** Acoustic guitar simulation powered by physical string modeling (featuring separated bass, treble, upstrokes, and muted slaps) alongside integrated percussion sounds.
+- **Flexible Harmonic Duration:** Easily toggle between **1 bar** or **2 bars** per chord (*ideal for fast rhythms like Baião and Frevo*).
+- **Tap Tempo Engine:** Automatically detect tempo (BPM) in real time by clicking the dedicated button or pressing the `T` key.
+- **Advanced Practice Modes:**
+  - **Count-in:** A 1-bar preparation count-in before playback begins.
+  - **Speed Trainer:** Automatically increases tempo by +5 BPM every 4 bars for speed training.
+  - **Gap Click:** Mutes 1 out of every 3 bars to test the musician's internal clock.
 
 ---
 
 ## Project Structure
 
     ├── main.py            # Main GUI, audio synthesizer engine, and precision metronome loop
+    ├── practice_data.py   # Data for practice options
     ├── rhythms_db.py      # Bilingual database of general and Brazilian rhythmic patterns
     ├── setup.py           # py2app configuration for macOS .app bundling
     ├── requirements.txt   # Packaging and macOS Cocoa framework dependencies
